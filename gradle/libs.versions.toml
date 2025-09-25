@@ -6,6 +6,7 @@ cameraCore = "1.5.0"
 cameraLifecycle = "1.5.0"
 cameraView = "1.5.0"
 composeEmojiPicker = "1.0.0"
+gpuimage = "2.1.0"
 guava = "33.5.0-android"
 guavaVersion = "31.1-android"
 kotlin = "2.0.21"
@@ -37,6 +38,7 @@ androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = 
 androidx-lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-compose", version.ref = "lifecycleRuntimeCompose" }
 androidx-lifecycle-viewmodel-compose = { module = "androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycleViewmodelCompose" }
 compose-emoji-picker-v100 = { module = "com.github.alexdametto:compose-emoji-picker", version.ref = "composeEmojiPicker" }
+gpuimage = { module = "jp.co.cyberagent.android:gpuimage", version.ref = "gpuimage" }
 guava = { module = "com.google.guava:guava", version.ref = "guava" }
 guava-v311android = { module = "com.google.guava:guava", version.ref = "guavaVersion" }
 junit = { group = "junit", name = "junit", version.ref = "junit" }

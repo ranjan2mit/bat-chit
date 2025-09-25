@@ -58,6 +58,7 @@ dependencies {
     implementation(libs.androidx.ui)
     implementation(libs.emoji2.emojipicker)
 
+    implementation(libs.gpuimage)
 
     implementation(libs.androidx.camera.core)
     implementation(libs.androidx.camera.camera2)
