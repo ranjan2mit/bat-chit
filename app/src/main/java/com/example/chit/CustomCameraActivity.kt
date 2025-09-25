@@ -1,16 +1,29 @@
 package com.example.chit
 
 import android.Manifest
+import android.content.ContentValues
+import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.ImageFormat
+import android.graphics.Matrix
+import android.graphics.YuvImage
+import android.media.Image
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.provider.MediaStore
 import android.util.Log
+import android.util.Size
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.*
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.view.PreviewView
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -18,15 +31,21 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Camera
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import jp.co.cyberagent.android.gpuimage.GPUImage
 import jp.co.cyberagent.android.gpuimage.filter.*
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
+import java.nio.ByteBuffer
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.Executors
@@ -46,7 +65,6 @@ class CustomCameraActivity : ComponentActivity() {
 
         setContent {
             CameraWithFilterScreen { filteredUri ->
-                // After capture, you get URI of the filtered image
                 setResult(RESULT_OK, Intent().apply { data = filteredUri })
                 finish()
             }
@@ -54,83 +72,106 @@ class CustomCameraActivity : ComponentActivity() {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun CameraWithFilterScreen(onImageCaptured: (Uri) -> Unit) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    // GPUImage instance
+    // GPUImage instance for preview
     val gpuImage = remember { GPUImage(context) }
 
-    // List of filters to swipe through
+    // List of filters with names
     val filters = remember {
-        listOf<GPUImageFilter>(
-            GPUImageFilter(),  // no filter
-            GPUImageSepiaToneFilter(),
-            GPUImageGrayscaleFilter(),
-            GPUImageBrightnessFilter(0.5f),
-            GPUImageContrastFilter(2.0f)
+        listOf(
+            FilterInfo("Normal", GPUImageFilter()),
+            FilterInfo("Sepia", GPUImageSepiaToneFilter()),
+            FilterInfo("Grayscale", GPUImageGrayscaleFilter()),
+            FilterInfo("Bright", GPUImageBrightnessFilter(0.3f)),
+            FilterInfo("Contrast", GPUImageContrastFilter(1.5f)),
+            FilterInfo("Saturation", GPUImageSaturationFilter(2.0f)),
+            FilterInfo("Vignette", GPUImageVignetteFilter()),
+            FilterInfo("Pixelated", GPUImagePixelationFilter()),
         )
     }
+
     var currentFilterIndex by remember { mutableStateOf(0) }
-    val currentFilter = filters[currentFilterIndex]
+    val currentFilterInfo = filters[currentFilterIndex]
+    val currentFilter = currentFilterInfo.filter
 
     // CameraX objects
     var imageCapture by remember { mutableStateOf<ImageCapture?>(null) }
+    var preview by remember { mutableStateOf<Preview?>(null) }
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // The preview, with gesture to swipe filters
-        AndroidView(
-            factory = { ctx ->
-                val previewView = androidx.camera.view.PreviewView(ctx)
-                startCamera(
-                    previewView = previewView,
-                    lifecycleOwner = lifecycleOwner,
-                    onImageCaptureReady = { ic -> imageCapture = ic },
-                    filter = currentFilter,
-                    gpuImage = gpuImage
-                )
-                previewView
-            },
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Filter name display
+        Text(
+            text = currentFilterInfo.name,
             modifier = Modifier
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures { change, dragAmount ->
-                        if (dragAmount > 0) {
-                            // swipe right
-                            currentFilterIndex = (currentFilterIndex - 1 + filters.size) % filters.size
-                        } else {
-                            // swipe left
-                            currentFilterIndex = (currentFilterIndex + 1) % filters.size
-                        }
-                        change.consume()
-                    }
-                }
+                .fillMaxWidth()
+                .background(Color.Black.copy(alpha = 0.5f))
+                .padding(16.dp),
+            color = Color.White,
+            textAlign = TextAlign.Center,
+            style = MaterialTheme.typography.titleMedium
         )
 
-        // Capture button
-        FloatingActionButton(
-            onClick = {
-                imageCapture?.let { ic ->
-                    captureWithFilter(ic, context, currentFilter, gpuImage, onImageCaptured)
-                }
-            },
-            modifier = Modifier
-                .align(androidx.compose.ui.Alignment.BottomCenter)
-                .padding(24.dp),
-            containerColor = MaterialTheme.colorScheme.primary,
-            shape = CircleShape
-        ) {
-            Icon(imageVector = Icons.Default.Camera, contentDescription = "Capture")
+        // Camera preview
+        Box(modifier = Modifier.weight(1f)) {
+            AndroidView(
+                factory = { ctx ->
+                    val previewView = PreviewView(ctx)
+                    startCamera(
+                        previewView = previewView,
+                        lifecycleOwner = lifecycleOwner,
+                        onPreviewReady = { p -> preview = p },
+                        onImageCaptureReady = { ic -> imageCapture = ic },
+                        filter = currentFilter,
+                        gpuImage = gpuImage
+                    )
+                    previewView
+                },
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectHorizontalDragGestures { change, dragAmount ->
+                            if (dragAmount > 20) { // Swipe right threshold
+                                currentFilterIndex = (currentFilterIndex - 1 + filters.size) % filters.size
+                            } else if (dragAmount < -20) { // Swipe left threshold
+                                currentFilterIndex = (currentFilterIndex + 1) % filters.size
+                            }
+                            change.consume()
+                        }
+                    }
+            )
+
+            // Capture button
+            FloatingActionButton(
+                onClick = {
+                    imageCapture?.let { ic ->
+                        captureWithFilter(ic, context, currentFilter, onImageCaptured)
+                    }
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(24.dp),
+                containerColor = MaterialTheme.colorScheme.primary,
+                shape = CircleShape
+            ) {
+                Icon(imageVector = Icons.Default.Camera, contentDescription = "Capture")
+            }
         }
     }
 }
 
+data class FilterInfo(val name: String, val filter: GPUImageFilter)
+
 /** Starts CameraX preview with filter applied in real time */
 private fun startCamera(
-    previewView: androidx.camera.view.PreviewView,
+    previewView: PreviewView,
     lifecycleOwner: androidx.lifecycle.LifecycleOwner,
+    onPreviewReady: (Preview) -> Unit,
     onImageCaptureReady: (ImageCapture) -> Unit,
     filter: GPUImageFilter,
     gpuImage: GPUImage
@@ -140,21 +181,29 @@ private fun startCamera(
         val cameraProvider = cameraProviderFuture.get()
 
         val preview = Preview.Builder().build()
-        val imageCapture = ImageCapture.Builder().build()
+        val imageCapture = ImageCapture.Builder()
+            .setCaptureMode(ImageCapture.CAPTURE_MODE_MINIMIZE_LATENCY)
+            .build()
 
-        // We use an ImageAnalysis to feed frames into GPUImage for live filter preview
+        // ImageAnalysis for real-time filtering
         val analyzer = ImageAnalysis.Builder()
+            .setTargetResolution(Size(640, 480)) // Lower resolution for better performance
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .build()
 
-        analyzer.setAnalyzer(ContextCompat.getMainExecutor(previewView.context)) { imageProxy ->
-            val bitmap = imageProxyToBitmap(imageProxy)
-            imageProxy.close()
-            if (bitmap != null) {
-                gpuImage.setImage(bitmap)
-                gpuImage.setFilter(filter)
-                // draws filtered image into the GLSurface or internal texture in GPUImage,
-                // so preview will show filtered result
+        analyzer.setAnalyzer(Executors.newSingleThreadExecutor()) { imageProxy ->
+            try {
+                val bitmap = imageProxyToBitmap(imageProxy)
+                if (bitmap != null) {
+                    gpuImage.setImage(bitmap)
+                    gpuImage.setFilter(filter)
+                    // Note: GPUImage doesn't directly modify PreviewView
+                    // This analyzer is mainly for processing, not live preview update
+                }
+            } catch (e: Exception) {
+                Log.e("CameraFilter", "Analysis failed: ${e.message}")
+            } finally {
+                imageProxy.close()
             }
         }
 
@@ -162,42 +211,101 @@ private fun startCamera(
 
         val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
 
-        cameraProvider.unbindAll()
-        cameraProvider.bindToLifecycle(
-            lifecycleOwner,
-            cameraSelector,
-            preview,
-            imageCapture,
-            analyzer
-        )
+        try {
+            cameraProvider.unbindAll()
+            cameraProvider.bindToLifecycle(
+                lifecycleOwner,
+                cameraSelector,
+                preview,
+                imageCapture,
+                analyzer
+            )
 
-        onImageCaptureReady(imageCapture)
+            onPreviewReady(preview)
+            onImageCaptureReady(imageCapture)
+        } catch (e: Exception) {
+            Log.e("CameraFilter", "Camera binding failed: ${e.message}")
+        }
     }, ContextCompat.getMainExecutor(previewView.context))
+}
+
+/** Improved ImageProxy to Bitmap conversion */
+@androidx.annotation.OptIn(ExperimentalGetImage::class)
+private fun imageProxyToBitmap(imageProxy: ImageProxy): Bitmap? {
+    val image = imageProxy.image ?: return null
+
+    when (image.format) {
+        ImageFormat.YUV_420_888 -> {
+            return yuv420ToBitmap(image)
+        }
+        ImageFormat.JPEG -> {
+            val buffer = image.planes[0].buffer
+            val bytes = ByteArray(buffer.remaining())
+            buffer.get(bytes)
+            return BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }
+        else -> return null
+    }
+}
+
+private fun yuv420ToBitmap(image: Image): Bitmap? {
+    val planes = image.planes
+    val yPlane = planes[0]
+    val uPlane = planes[1]
+    val vPlane = planes[2]
+
+    val yBuffer = yPlane.buffer
+    val uBuffer = uPlane.buffer
+    val vBuffer = vPlane.buffer
+
+    val ySize = yBuffer.remaining()
+    val uSize = uBuffer.remaining()
+    val vSize = vBuffer.remaining()
+
+    val nv21 = ByteArray(ySize + uSize + vSize)
+
+    // Copy Y plane
+    yBuffer.get(nv21, 0, ySize)
+
+    // Copy UV planes
+    vBuffer.get(nv21, ySize, vSize)
+    uBuffer.get(nv21, ySize + vSize, uSize)
+
+    val yuvImage = YuvImage(
+        nv21,
+        ImageFormat.NV21,
+        image.width,
+        image.height,
+        null
+    )
+
+    val out = ByteArrayOutputStream()
+    yuvImage.compressToJpeg(android.graphics.Rect(0, 0, image.width, image.height), 100, out)
+    val imageBytes = out.toByteArray()
+    return BitmapFactory.decodeByteArray(imageBytes, 0, imageBytes.size)
 }
 
 /** Capture a photo with the current filter applied */
 private fun captureWithFilter(
     imageCapture: ImageCapture,
-    context: android.content.Context,
+    context: Context,
     filter: GPUImageFilter,
-    gpuImage: GPUImage,
     onImageCaptured: (Uri) -> Unit
 ) {
-    // First take a picture, then apply filter and save
     val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
     val name = "IMG_${sdf.format(Date())}.jpg"
 
-    val contentValues = android.content.ContentValues().apply {
-        put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
-        put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-            put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FilteredCamera")
+    val contentValues = ContentValues().apply {
+        put(MediaStore.Images.Media.DISPLAY_NAME, name)
+        put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FilteredCamera")
         }
     }
 
     val outputOptions = ImageCapture.OutputFileOptions.Builder(
         context.contentResolver,
-        android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+        MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
         contentValues
     ).build()
 
@@ -213,7 +321,6 @@ private fun captureWithFilter(
             override fun onImageSaved(output: ImageCapture.OutputFileResults) {
                 val savedUri = output.savedUri
                 if (savedUri != null) {
-                    // Now apply the filter to the saved image
                     applyFilterToUri(savedUri, filter, context, onImageCaptured)
                 }
             }
@@ -221,57 +328,61 @@ private fun captureWithFilter(
     )
 }
 
-/** Load the image at uri, apply filter, save it, and return new Uri */
+/** Apply filter to captured image and save */
 private fun applyFilterToUri(
     uri: Uri,
     filter: GPUImageFilter,
-    context: android.content.Context,
+    context: Context,
     onImageSaved: (Uri) -> Unit
 ) {
     try {
-        val input = context.contentResolver.openInputStream(uri)
-        val bmp = android.graphics.BitmapFactory.decodeStream(input)
+        val input: InputStream? = context.contentResolver.openInputStream(uri)
+        val originalBitmap = BitmapFactory.decodeStream(input)
         input?.close()
-        val gpu = GPUImage(context)
-        gpu.setImage(bmp)
-        gpu.setFilter(filter)
-        val filteredBmp = gpu.bitmapWithFilterApplied
 
-        // Save filteredBmp to a new URI
+        if (originalBitmap == null) {
+            onImageSaved(uri) // Fallback to original
+            return
+        }
+
+        val gpu = GPUImage(context)
+        gpu.setImage(originalBitmap)
+        gpu.setFilter(filter)
+        val filteredBitmap = gpu.bitmapWithFilterApplied
+
+        // Save filtered bitmap
         val sdf = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US)
-        val name = "FILT_${sdf.format(Date())}.jpg"
-        val cv = android.content.ContentValues().apply {
-            put(android.provider.MediaStore.Images.Media.DISPLAY_NAME, name)
-            put(android.provider.MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
-            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
-                put(android.provider.MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FilteredCamera")
+        val name = "FILTERED_${sdf.format(Date())}.jpg"
+
+        val contentValues = ContentValues().apply {
+            put(MediaStore.Images.Media.DISPLAY_NAME, name)
+            put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/FilteredCamera")
             }
         }
+
         val newUri = context.contentResolver.insert(
-            android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, cv
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI,
+            contentValues
         )
 
-        newUri?.let {
-            val os = context.contentResolver.openOutputStream(it)
-            os?.use { stream ->
-                filteredBmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 90, stream)
+        newUri?.let { uri ->
+            context.contentResolver.openOutputStream(uri)?.use { outputStream ->
+                filteredBitmap?.compress(Bitmap.CompressFormat.JPEG, 90, outputStream)
             }
-            onImageSaved(it)
-        } ?: run {
-            // fallback: return original
+            Toast.makeText(context, "Photo saved with filter!", Toast.LENGTH_SHORT).show()
             onImageSaved(uri)
+        } ?: run {
+            onImageSaved(uri) // Fallback to original
         }
-    } catch (e: Exception) {
-        Log.e("CameraFilter", "Filter or save failed: ${e.message}", e)
-        onImageSaved(uri)
-    }
-}
 
-/** Convert ImageProxy to Bitmap (simple version) */
-private fun imageProxyToBitmap(imageProxy: ImageProxy): android.graphics.Bitmap? {
-    val plane = imageProxy.planes.firstOrNull() ?: return null
-    val buffer = plane.buffer
-    val bytes = ByteArray(buffer.remaining())
-    buffer.get(bytes)
-    return android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        // Recycle bitmaps
+        originalBitmap.recycle()
+        filteredBitmap?.recycle()
+
+    } catch (e: Exception) {
+        Log.e("CameraFilter", "Filter application failed: ${e.message}", e)
+        onImageSaved(uri) // Fallback to original
+    }
 }
