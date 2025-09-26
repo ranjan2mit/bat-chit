@@ -57,7 +57,8 @@ dependencies {
     implementation(libs.androidx.room.common.jvm)
     implementation(libs.androidx.ui)
     implementation(libs.emoji2.emojipicker)
-
+    implementation("com.squareup.retrofit2:retrofit:3.0.0")
+    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
     implementation(libs.gpuimage)
 
     implementation(libs.androidx.camera.core)

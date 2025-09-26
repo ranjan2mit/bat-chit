@@ -1,6 +1,8 @@
 package com.example.chit
 import android.content.Intent
 import android.os.Bundle
+import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
@@ -14,6 +16,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.*
+import com.example.chit.model.SendOtpRequest
+import com.example.chit.model.SendOtpResponse
+import com.example.chit.network.ApiClient
+import retrofit2.Call
+import retrofit2.Response
+
+import retrofit2.Callback
 
 class PhoneInputActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -29,6 +38,8 @@ fun PhoneNumberScreen() {
     var phoneNumber by remember { mutableStateOf("") }
     val isValid = phoneNumber.length == 10 && phoneNumber.all { it.isDigit() }
     val context = LocalContext.current
+    var isLoading by remember { mutableStateOf(false) }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -62,17 +73,37 @@ fun PhoneNumberScreen() {
 
         Button(
             onClick = {
-                val intent = Intent(context, OtpActivity::class.java).apply {
-                    putExtra("phone_number", phoneNumber)
-                }
-                context.startActivity(intent)
+                isLoading = true
+                val fullPhone = "91$phoneNumber" // Or however your backend expects it
+                val request = SendOtpRequest(fullPhone)
+                ApiClient.apiService.sendOtp(request).enqueue(object : Callback<SendOtpResponse> {
+                    override fun onResponse(call: Call<SendOtpResponse>, response: Response<SendOtpResponse>) {
+                        isLoading = false
+                        Log.e("OTP message", response.body()?.message.toString() )
+                        if (response.body()?.status.equals("success")) {
+                            // Go to OTP screen
+                            val intent = Intent(context, OtpActivity::class.java).apply {
+                                putExtra("phone_number", phoneNumber)
+                            }
+                            context.startActivity(intent)
+                        } else {
+                            Toast.makeText(context, "Failed to send OTP", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+
+                    override fun onFailure(call: Call<SendOtpResponse>, t: Throwable) {
+                        isLoading = false
+                        Toast.makeText(context, "Network error", Toast.LENGTH_SHORT).show()
+                        Log.e("OTP", "API call failed", t)
+                    }
+                })
             },
-            enabled = isValid,
+            enabled = isValid && !isLoading,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp)
         ) {
-            Text("Next")
+            Text(if (isLoading) "Sending..." else "Next")
         }
 
         if (!isValid && phoneNumber.isNotEmpty()) {
