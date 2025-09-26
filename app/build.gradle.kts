@@ -58,7 +58,8 @@ dependencies {
     implementation(libs.androidx.ui)
     implementation(libs.emoji2.emojipicker)
     implementation("com.squareup.retrofit2:retrofit:3.0.0")
-    implementation("com.squareup.retrofit2:converter-gson:2.9.0")
+    implementation("com.squareup.retrofit2:converter-gson:3.0.0")
+    implementation("androidx.datastore:datastore-preferences:1.1.7")
     implementation(libs.gpuimage)
 
     implementation(libs.androidx.camera.core)

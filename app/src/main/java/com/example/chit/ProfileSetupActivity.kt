@@ -101,6 +101,15 @@ fun ProfileSetupScreen() {
 
         Button(
             onClick = {
+                // Save name and profile image URI to SharedPreferences
+                val sharedPref = context.getSharedPreferences("user_prefs", ComponentActivity.MODE_PRIVATE)
+                sharedPref.edit().apply {
+                    putString("name", name)
+                    putString("profile_img_url", profileImageUri?.toString() ?: "")
+                    putBoolean("profile_setup", true)
+                    apply()
+                }
+
                 val intent = Intent(context, ChatHomeActivity::class.java)
                 context.startActivity(intent)
             },
